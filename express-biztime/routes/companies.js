@@ -1,5 +1,6 @@
 const db = require("../db");
 const express = require("express");
+const slugify = require("slugify");
 const ExpressError = require("../expressError");
 
 const router = new express.Router();
@@ -15,72 +16,37 @@ router.get("/", async (req, res, next) => {
 
 router.get("/:code", async (req, res, next) => {
   try {
-    const results = await db.query(
-      `SELECT c.code,
-        c.name, 
-        c.description, 
-        i.id,
-        i.amt, 
-        i.paid, 
-        i.add_date, 
-        i.paid_date 
-        FROM companies AS c 
-        INNER JOIN invoices AS i 
-        ON (c.code=i.comp_code)      
+    let { code } = req.params;
+    const compRes = await db.query(
+      `SELECT *
+        FROM companies      
         WHERE code = $1`,
-      [req.params.code]
+      [code]
     );
-    if (results.rows.length === 0) {
+    const invRes = await db.query(
+      `SELECT *
+        FROM invoices
+        WHERE comp_code = $1`,
+      [code]
+    );
+    const indRes = await db.query(
+      `SELECT * 
+      FROM companies_industries
+      WHERE comp_code = $1`,
+      [code]
+    );
+    const company = compRes.rows[0];
+    const invoices = invRes.rows;
+    const industries = indRes.rows;
+    company.invoices = invoices.map((r) => r.id);
+    company.industries = industries.map((r) => r.ind_code);
+    if (compRes.rows.length === 0) {
       throw new ExpressError(
         `Could not find company with code: ${req.params.code}`,
         404
       );
     }
-    const data = results.rows[0];
-    const company = {
-      code: data.code,
-      name: data.name,
-      description: data.description,
-      invoice: {
-        id: data.id,
-        amt: data.amt,
-        paid: data.paid,
-        add_date: data.add_date,
-        paid_date: data.paid_date,
-      },
-    };
-    return res.send(company);
-  } catch (e) {
-    return next(e);
-  }
-});
-
-router.get("/:id", async (req, res, next) => {
-  try {
-    const results = await db.query(
-      `SELECT i.id, 
-        i.comp_code, 
-        i.amt, 
-        i.paid, 
-        i.add_date, 
-        i.paid_date, 
-        c.name, 
-        c.description 
-        FROM invoices AS i 
-        INNER JOIN companies AS c 
-        ON (i.comp_code=c.code)      
-        WHERE id = $1 
-  `,
-      [req.params.id]
-    );
-    if (!results.rows[0]) {
-      throw new ExpressError(
-        `Could not find invoice with id: ${req.params.id}`,
-        404
-      );
-    }
-
-    return res.send(invoice);
+    return res.send({ company: company });
   } catch (e) {
     return next(e);
   }
@@ -88,10 +54,10 @@ router.get("/:id", async (req, res, next) => {
 
 router.post("/", async (req, res, next) => {
   try {
-    const { code, name, description } = req.body;
+    const { name, description } = req.body;
     const results = await db.query(
       `INSERT INTO companies (code, name, description) VALUES ($1,$2,$3) RETURNING code, name, description`,
-      [code, name, description]
+      [slugify(name), name, description]
     );
     return res.status(201).send({ company: results.rows[0] });
   } catch (e) {
